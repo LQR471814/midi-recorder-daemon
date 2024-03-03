@@ -5,8 +5,6 @@
 ### usage
 
 1. run `./midi-recorder-daemon -show-ports` while your midi device is connected, it should show a list of entries in a format like `<number> | <device name>`, you should then note down the `<number>` or a unique part of `<device name>` so you can reference it later:
-    1. the midi number of the device.
-    2. the device name.
 2. run either:
     1. `./midi-recorder-daemon -port-name <unique part of device name>` to search for midi devices whose names contain the `<unique part>` specified.
     1. `./midi-recorder-daemon -port-number <port number>` to search for a midi device with the exact port number specified.
