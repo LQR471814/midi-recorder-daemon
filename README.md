@@ -1,4 +1,4 @@
-## midi-daemon
+## midi-recorder-daemon
 
 > a daemon that automatically records and saves midi in the background. useful if you spontaneously improvise often. 
 
