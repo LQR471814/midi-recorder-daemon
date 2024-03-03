@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"gitlab.com/gomidi/midi/v2"
-	"gitlab.com/gomidi/midi/v2/drivers"
 	"gitlab.com/gomidi/midi/v2/smf"
 )
 
@@ -26,7 +25,8 @@ func (o TrackOptions) NewTrack() smf.Track {
 }
 
 type RecorderOptions struct {
-	Port            drivers.In
+	Cancel          chan struct{}
+	PortManager     *PortManager
 	TrackOptions    TrackOptions
 	GetRecordOutput func() io.WriteCloser
 	Timeout         int
@@ -42,20 +42,32 @@ type Recorder struct {
 	ticks    smf.MetricTicks
 	track    smf.Track
 	unitChan chan midiUnit
+	lastms   int32
 }
 
-func NewRecorder(options RecorderOptions) *Recorder {
+func StartRecording(options RecorderOptions) *Recorder {
 	r := &Recorder{
 		ticks:    smf.MetricTicks(96),
 		opts:     options,
 		track:    nil,
 		unitChan: make(chan midiUnit, 1024),
 	}
-	go r.startWorker()
+
+	go r.worker()
+
+	r.opts.PortManager.AddListener(r)
+	if r.opts.Cancel != nil {
+		go func() {
+			<-r.opts.Cancel
+			log.Println("stopping...")
+			r.opts.PortManager.Stop()
+		}()
+	}
+
 	return r
 }
 
-func (r *Recorder) startNewRecording() {
+func (r *Recorder) newRecording() {
 	if r.track != nil {
 		mf := smf.New()
 		mf.TimeFormat = r.ticks
@@ -75,7 +87,7 @@ func (r *Recorder) startNewRecording() {
 	r.track = r.opts.TrackOptions.NewTrack()
 }
 
-func (r *Recorder) startWorker() {
+func (r *Recorder) worker() {
 	timer := time.NewTimer(9999 * 24 * time.Hour)
 	for {
 		select {
@@ -83,7 +95,7 @@ func (r *Recorder) startWorker() {
 			if r.track == nil {
 				break
 			}
-			r.startNewRecording()
+			r.newRecording()
 		case unit := <-r.unitChan:
 			delta := r.ticks.Ticks(
 				r.opts.TrackOptions.Tempo,
@@ -96,21 +108,12 @@ func (r *Recorder) startWorker() {
 	}
 }
 
-func (r *Recorder) AutoRecord(cancel chan struct{}) error {
-	var lastms int32
-	cancelfn, err := midi.ListenTo(r.opts.Port, func(msg midi.Message, currentms int32) {
-		deltams := currentms - lastms
-		lastms = currentms
-		r.unitChan <- midiUnit{
-			msg:     msg,
-			deltams: deltams,
-		}
-	})
-	if err != nil {
-		return err
+func (r *Recorder) OnMessage(msg midi.Message, currentms int32) {
+	deltams := currentms - r.lastms
+	r.lastms = currentms
+	r.unitChan <- midiUnit{
+		msg:     msg,
+		deltams: deltams,
 	}
-	<-cancel
-	log.Println("stopping...")
-	cancelfn()
-	return nil
 }
+

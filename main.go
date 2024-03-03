@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"gitlab.com/gomidi/midi/v2"
@@ -20,7 +21,9 @@ func main() {
 	showPorts := flag.Bool("show-ports", false, "show midi ports available without recording, if you specify this flag, you will not need to specify any other flags.")
 
 	output := flag.String("output", "output", "the path to the folder where all midi recordings will be saved.")
-	portNumber := flag.Int("port", -1, "the midi port number to record on.")
+	portNumber := flag.Int("port-number", -1, "search for a midi port by its port number, this flag is mutually exclusive with '-port-name'.")
+	portName := flag.String("port-name", "", "search for a midi port by a keyword in its lowercased name, this flag is mutually exclusive with '-port-number'.")
+	portPollTimeout := flag.Int("port-poll-timeout", 5, "seconds to wait between polling if a midi port exists.")
 
 	meterNumerator := flag.Int("meter-numerator", 4, "the numerator of the time signature.")
 	meterDenominator := flag.Int("meter-denominator", 4, "the denominator of the time signature.")
@@ -45,23 +48,41 @@ func main() {
 		return
 	}
 
-	if *portNumber < 0 {
-		log.Fatal("you must specify a midi port to record on with the '-port' flag.")
+	lowerPortName := strings.ToLower(*portName)
+
+	if *portNumber < 0 && lowerPortName == "" {
+		log.Fatal("you must specify either '-port-name' or '-port-number' to record midi.")
+	}
+	if *portNumber >= 0 && lowerPortName != "" {
+		log.Fatal("you cannot specify both '-port-name' and '-port-number'.")
+	}
+	if lowerPortName != "" {
+		log.Printf("searching for port via keyword \"%s\"\n", lowerPortName)
+	}
+	if *portNumber >= 0 {
+		log.Printf("searching for port number %d\n", *portNumber)
 	}
 
-	port, err := midi.InPort(*portNumber)
-	if err != nil {
-		log.Fatal(err)
-	}
+	portManager := NewPortManager(PortManagerOptions{
+		PortNumber:  *portNumber,
+		PortName:    *portName,
+		PollTimeout: *portPollTimeout,
+	})
 
 	err = os.Mkdir(*output, 0777)
 	if err != nil && !os.IsExist(err) {
 		log.Fatal(err)
 	}
 
-	recorder := NewRecorder(RecorderOptions{
-		Timeout: *timeout,
-		Port:    port,
+	signalAccepter := make(chan os.Signal)
+	signal.Notify(signalAccepter, os.Interrupt, os.Kill)
+
+	cancel := make(chan struct{})
+
+	StartRecording(RecorderOptions{
+		Cancel:      cancel,
+		Timeout:     *timeout,
+		PortManager: portManager,
 		TrackOptions: TrackOptions{
 			MeterNumerator:   *meterNumerator,
 			MeterDenominator: *meterDenominator,
@@ -100,17 +121,6 @@ func main() {
 		},
 	})
 
-	signalAccepter := make(chan os.Signal)
-	signal.Notify(signalAccepter, os.Interrupt, os.Kill)
-
-	cancelSignal := make(chan struct{})
-	go func() {
-		<-signalAccepter
-		cancelSignal <- struct{}{}
-	}()
-
-	err = recorder.AutoRecord(cancelSignal)
-	if err != nil {
-		log.Fatal(err)
-	}
+	<-signalAccepter
+	cancel <- struct{}{}
 }
