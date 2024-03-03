@@ -11,6 +11,14 @@
 3. if you want to specify the output location (by default it is `./output`), add `-output <path>` to the command.
 4. leave the command running and the daemon will automatically start recording when midi messages are received.
 
+the output folder structure looks something like this.
+
+- `output directory`
+  - `year`
+    - `month`
+      - `day`
+        - `hour_min_s.midi`
+
 here are the full command flags of `midi-recorder-daemon`:
 
 ```
